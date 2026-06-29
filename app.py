@@ -1203,15 +1203,19 @@ def obter_presencas_por_data(data_presenca):
     return df.set_index("colaborador_id").to_dict(orient="index")
 
 
+
+
 def obter_ids_desligados_antes(data_referencia):
     conn = conectar()
+
+    primeiro_dia_mes = date(data_referencia.year, data_referencia.month, 1)
 
     df = pd.read_sql_query("""
         SELECT DISTINCT colaborador_id
         FROM presencas
         WHERE status = 'Desligado'
           AND data < %s
-    """, conn, params=(str(data_referencia),))
+    """, conn, params=(str(primeiro_dia_mes),))
 
     conn.close()
 
@@ -1220,6 +1224,19 @@ def obter_ids_desligados_antes(data_referencia):
 
     return set(df["colaborador_id"].tolist())
 
+
+def calcular_headcount_periodo(colaboradores_base, data_inicio):
+    if colaboradores_base.empty:
+        return 0
+
+    ids_desligados_antes = obter_ids_desligados_antes(data_inicio)
+
+    base_ativa_periodo = colaboradores_base[
+        (colaboradores_base["ativo"].apply(converter_ativo) == 1) &
+        (~colaboradores_base["id"].isin(ids_desligados_antes))
+    ]
+
+    return len(base_ativa_periodo)
 
 def salvar_presenca(colaborador_id, data_presenca, status, observacao, permitir_alteracao=False):
     colaborador_id = int(colaborador_id)
@@ -1284,23 +1301,7 @@ def salvar_presenca(colaborador_id, data_presenca, status, observacao, permitir_
 # INDICADORES E HISTÓRICO
 # =========================
 
-def calcular_headcount_periodo(colaboradores_base, data_inicio=None):
-    if colaboradores_base.empty:
-        return 0
-
-    base = colaboradores_base.copy()
-
-    if "ativo" in base.columns:
-        base = base[base["ativo"].apply(converter_ativo) == 1]
-
-    if data_inicio is not None:
-        ids_desligados_antes = obter_ids_desligados_antes(data_inicio)
-        base = base[~base["id"].isin(ids_desligados_antes)]
-
-    return len(base)
-
-
-def calcular_indicadores(df_periodo, colaboradores_base, data_inicio=None):
+def calcular_indicadores(df_periodo, colaboradores_base):
     if df_periodo.empty:
         total_registros = 0
         ausencias = 0
@@ -1314,7 +1315,7 @@ def calcular_indicadores(df_periodo, colaboradores_base, data_inicio=None):
         faltas = len(df_periodo[df_periodo["status"] == "Falta"])
         desligados = df_periodo[df_periodo["status"] == "Desligado"]["colaborador_id"].nunique()
 
-    headcount = calcular_headcount_periodo(colaboradores_base, data_inicio)
+    headcount = len(colaboradores_base[colaboradores_base["ativo"] == 1]) if not colaboradores_base.empty else 0
 
     abs_pct = (ausencias / total_registros * 100) if total_registros > 0 else 0
     turnover_pct = (desligados / headcount * 100) if headcount > 0 else 0
@@ -1329,6 +1330,7 @@ def calcular_indicadores(df_periodo, colaboradores_base, data_inicio=None):
         "abs_pct": abs_pct,
         "turnover_pct": turnover_pct
     }
+
 
 def montar_tabela_historico(df):
     if df.empty:
@@ -1555,20 +1557,21 @@ def pagina_operacao_lancamento():
     with col1:
         data_presenca = st.date_input("Data", value=date.today())
 
-    ids_desligados_antes = obter_ids_desligados_antes(data_presenca)
-    colaboradores = colaboradores[
-        ~colaboradores["id"].isin(ids_desligados_antes)
-    ].copy()
-
-    if colaboradores.empty:
-        st.warning("Nenhum colaborador ativo para essa data. Colaboradores desligados antes da data selecionada não entram na chamada.")
-        return
-
     with col2:
         responsavel_selecionado = st.selectbox(
             "Responsável",
             opcoes_unicas(colaboradores, "gestor_responsavel", "Todos")
         )
+
+    ids_desligados_antes = obter_ids_desligados_antes(data_presenca)
+
+    colaboradores = colaboradores[
+        ~colaboradores["id"].isin(ids_desligados_antes)
+    ].copy()
+
+    if colaboradores.empty:
+        st.warning("Nenhum colaborador ativo para lançamento nesta competência.")
+        return
 
     colaboradores_filtrados = colaboradores.copy()
 
@@ -1771,7 +1774,13 @@ def pagina_operacao_historico():
         if responsavel != "Todos":
             df_periodo = df_periodo[df_periodo["gestor_responsavel"] == responsavel]
 
-    indicadores = calcular_indicadores(df_periodo, colaboradores_base, data_inicio)
+    indicadores = calcular_indicadores(df_periodo, colaboradores_base)
+    indicadores["headcount"] = calcular_headcount_periodo(colaboradores_base, data_inicio)
+    indicadores["turnover_pct"] = (
+        indicadores["desligados"] / indicadores["headcount"] * 100
+        if indicadores["headcount"] > 0
+        else 0
+    )
 
     colm1, colm2, colm3, colm4 = st.columns(4)
     colm1.metric("Headcount", indicadores["headcount"])
@@ -2184,7 +2193,7 @@ def pagina_gestor():
             if responsavel != "Todos":
                 df_periodo = df_periodo[df_periodo["gestor_responsavel"] == responsavel]
 
-        indicadores = calcular_indicadores(df_periodo, colaboradores_base, data_inicio)
+        indicadores = calcular_indicadores(df_periodo, colaboradores_base)
 
         colm1, colm2, colm3, colm4 = st.columns(4)
         colm1.metric("Headcount", indicadores["headcount"])
