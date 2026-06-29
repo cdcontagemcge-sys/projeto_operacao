@@ -34,7 +34,7 @@ STATUS_PRESENCA = [
     "Falta",
     "Atestado",
     "Folga",
-    "Folga Dominical",
+    t("Folga Dominical"),
     "DSR",
     "Férias",
     "Afastamento",
@@ -66,6 +66,111 @@ PERFIS_USUARIO = [
     "Gestor",
     "Operação"
 ]
+
+IDIOMAS_DISPONIVEIS = {
+    "Português (PT-BR)": "pt",
+    "中文简体": "zh"
+}
+
+TRADUCOES = {
+    "pt": {},
+    "zh": {
+        "Lista de Presença RH": "人力资源考勤表",
+        "Usuário": "用户",
+        "Senha": "密码",
+        "Entrar": "登录",
+        "Usuário ou senha inválidos.": "用户名或密码无效。",
+        "Idioma": "语言",
+        "Painel do Gestor - RH": "人力资源管理面板",
+        "Operação - Presença RH": "运营 - 人力资源考勤",
+        "Dashboard": "仪表板",
+        "Importar Dados": "导入数据",
+        "Cadastrar / Alterar Pessoas": "新增 / 修改人员",
+        "Colaboradores": "员工",
+        "Escala Folga Dominical": "周日休息排班",
+        "Exportar Excel": "导出 Excel",
+        "Acessos": "访问权限",
+        "Lançamento": "考勤录入",
+        "Histórico": "历史记录",
+        "Lançamento de Presença": "考勤录入",
+        "Histórico de Presença": "考勤历史",
+        "Dashboard gerencial": "管理仪表板",
+        "Importar dados de colaboradores": "导入员工数据",
+        "Cadastro e alteração de colaboradores": "员工新增与修改",
+        "Base de colaboradores": "员工数据库",
+        "Escala de Folga Dominical": "周日休息排班",
+        "Exportar Excel": "导出 Excel",
+        "Gestão de acessos": "访问权限管理",
+        t("Data"): "日期",
+        t("Data inicial"): "开始日期",
+        t("Data final"): "结束日期",
+        t("Responsável"): "负责人",
+        "Todos": "全部",
+        t("Matrícula"): "工号",
+        t("Nome"): "姓名",
+        t("Cargo"): "职位",
+        t("Status"): "状态",
+        t("Observação"): "备注",
+        "Selecione": "请选择",
+        "Salvar novos lançamentos": "保存新记录",
+        "Salvar alterações": "保存修改",
+        "Alterar lançamentos desta data": "修改当天记录",
+        "Sair": "退出",
+        "Perfil": "角色",
+        "Filial": "分部",
+        "Headcount": "在岗人数",
+        "Turnover": "人员流动率",
+        "Desligados": "离职人数",
+        "Registros": "记录数",
+        "Presentes": "出勤",
+        "Faltas": "缺勤",
+        "Ausências ABS": "缺勤ABS",
+        "Baixar histórico em Excel": "下载历史 Excel",
+        "Baixar modelo de importação": "下载导入模板",
+        t("Arquivo Excel"): "Excel 文件",
+        t("Aba da planilha"): "工作表",
+        t("Linha onde está o cabeçalho"): "表头所在行",
+        "Importar dados para o sistema": "导入到系统",
+        "Salvar alterações da base": "保存数据库修改",
+        "Cadastrar novo": "新增",
+        "Alterar cadastro": "修改资料",
+        "Cadastrar": "新增",
+        "Ativo": "启用",
+        t("Gênero"): "性别",
+        t("Folga Dominical"): "周日休息",
+        t("Jornada de Trabalho"): "工作班次",
+        t("Setor"): "部门",
+        "Logins - JMS": "JMS 登录",
+        "Baixar Excel": "下载 Excel",
+        "Baixar PDF paisagem": "下载横向 PDF",
+        "Gravar escala no histórico": "保存排班到历史",
+        t("Ano"): "年份",
+        t("Mês"): "月份",
+        "Criar novo acesso": "创建新访问",
+        "Criar acesso": "创建访问",
+        "Alterar acesso existente": "修改现有访问",
+        "Nova senha": "新密码",
+        "Salvar alteração do acesso": "保存访问修改",
+        "Usuários cadastrados": "已注册用户"
+    }
+}
+
+def obter_codigo_idioma():
+    return st.session_state.get("idioma", "pt")
+
+def t(texto):
+    return TRADUCOES.get(obter_codigo_idioma(), {}).get(texto, texto)
+
+def seletor_idioma(chave="idioma_selector"):
+    idioma_atual = st.session_state.get("idioma", "pt")
+    opcoes = list(IDIOMAS_DISPONIVEIS.keys())
+    indice = 0
+    for i, rotulo in enumerate(opcoes):
+        if IDIOMAS_DISPONIVEIS[rotulo] == idioma_atual:
+            indice = i
+            break
+    selecionado = st.selectbox(t("Idioma"), opcoes, index=indice, key=chave)
+    st.session_state["idioma"] = IDIOMAS_DISPONIVEIS[selecionado]
 
 
 # =========================
@@ -1457,10 +1562,10 @@ def montar_tabela_historico(df):
 
     tabela = tabela.rename(columns={
         "nome": "Nome do Colaborador",
-        "matricula": "Matrícula",
-        "jornada_trabalho": "Jornada de Trabalho",
-        "cargo": "Cargo",
-        "setor": "Setor",
+        "matricula": t("Matrícula"),
+        "jornada_trabalho": t("Jornada de Trabalho"),
+        "cargo": t("Cargo"),
+        "setor": t("Setor"),
         "logins_jms": "Logins - JMS"
     })
 
@@ -1535,7 +1640,7 @@ def estilo_status(valor):
         return "background-color: #FFC7CE; color: #9C0006"
     if valor == "Atestado":
         return "background-color: #DDEBF7; color: #1F4E78"
-    if valor in ["Folga", "Folga Dominical", "DSR", "Férias", "Feriado"]:
+    if valor in ["Folga", t("Folga Dominical"), "DSR", "Férias", "Feriado"]:
         return "background-color: #FFF2CC; color: #7F6000"
     if valor in ["Afastamento", "Desligado"]:
         return "background-color: #E7E6E6; color: #404040"
@@ -1576,15 +1681,15 @@ def gerar_excel_modelo(df, data_ref, responsavel):
 
     ws["A6"] = "Nº"
     ws["B6"] = "Nome do Colaborador"
-    ws["C6"] = "Matrícula"
-    ws["D6"] = "Jornada de Trabalho"
-    ws["E6"] = "Cargo"
-    ws["F6"] = "Setor"
+    ws["C6"] = t("Matrícula")
+    ws["D6"] = t("Jornada de Trabalho")
+    ws["E6"] = t("Cargo")
+    ws["F6"] = t("Setor")
     ws["G6"] = "Logins - JMS"
-    ws["H6"] = "Folga Dominical"
-    ws["I6"] = "Gênero"
-    ws["J6"] = "Status"
-    ws["K6"] = "Observação"
+    ws["H6"] = t("Folga Dominical")
+    ws["I6"] = t("Gênero")
+    ws["J6"] = t("Status")
+    ws["K6"] = t("Observação")
 
     linha_inicial = 7
     df = df.reset_index(drop=True)
@@ -1616,12 +1721,13 @@ def gerar_excel_modelo(df, data_ref, responsavel):
 # =========================
 
 def login():
-    st.title("Lista de Presença RH")
+    st.title(t("Lista de Presença RH"))
+    seletor_idioma("idioma_login")
 
-    usuario = st.text_input("Usuário")
-    senha = st.text_input("Senha", type="password")
+    usuario = st.text_input(t("Usuário"))
+    senha = st.text_input(t("Senha"), type="password")
 
-    if st.button("Entrar"):
+    if st.button(t("Entrar")):
         dados_usuario = autenticar_usuario(usuario, senha)
 
         if dados_usuario:
@@ -1630,7 +1736,7 @@ def login():
             st.session_state["perfil"] = dados_usuario["perfil"]
             st.rerun()
         else:
-            st.error("Usuário ou senha inválidos.")
+            st.error(t("Usuário ou senha inválidos."))
 
 
 
@@ -1777,7 +1883,7 @@ def gerar_escala_folga_dominical(colaboradores_base, ano, mes, responsavel="Todo
                 "responsavel": row.get("gestor_responsavel", ""),
                 "folga_dominical": row.get("folga_dominical", ""),
                 "genero": genero,
-                "status": "Folga Dominical",
+                "status": t("Folga Dominical"),
                 "motivo_regra": motivo,
                 "colaborador_id": colaborador_id
             })
@@ -1851,19 +1957,19 @@ def gerar_excel_escala_folga_dominical(df_escala):
         df_export["data_domingo"] = pd.to_datetime(df_export["data_domingo"]).dt.strftime("%d/%m/%Y")
         df_export = df_export.rename(columns={
             "data_domingo": "Data Domingo",
-            "matricula": "Matrícula",
-            "nome": "Nome",
-            "cargo": "Cargo",
-            "setor": "Setor",
-            "responsavel": "Responsável",
-            "folga_dominical": "Folga Dominical",
-            "genero": "Gênero",
-            "status": "Status",
+            "matricula": t("Matrícula"),
+            "nome": t("Nome"),
+            "cargo": t("Cargo"),
+            "setor": t("Setor"),
+            "responsavel": t("Responsável"),
+            "folga_dominical": t("Folga Dominical"),
+            "genero": t("Gênero"),
+            "status": t("Status"),
             "motivo_regra": "Regra Aplicada"
         })
         colunas = [
-            "Data Domingo", "Matrícula", "Nome", "Cargo", "Setor",
-            "Responsável", "Folga Dominical", "Gênero", "Status", "Regra Aplicada"
+            "Data Domingo", t("Matrícula"), t("Nome"), t("Cargo"), t("Setor"),
+            t("Responsável"), t("Folga Dominical"), t("Gênero"), t("Status"), "Regra Aplicada"
         ]
         df_export = df_export[[col for col in colunas if col in df_export.columns]]
 
@@ -1894,7 +2000,7 @@ def gerar_pdf_escala_folga_dominical(df_escala, titulo="Escala de Folga Dominica
         df_pdf = df_escala.copy()
         df_pdf["data_domingo"] = pd.to_datetime(df_pdf["data_domingo"]).dt.strftime("%d/%m/%Y")
         colunas = ["data_domingo", "matricula", "nome", "cargo", "responsavel", "genero", "status"]
-        headers = ["Data", "Matrícula", "Nome", "Cargo", "Responsável", "Gênero", "Status"]
+        headers = [t("Data"), t("Matrícula"), t("Nome"), t("Cargo"), t("Responsável"), t("Gênero"), t("Status")]
         dados = [headers]
 
         for _, row in df_pdf[colunas].iterrows():
@@ -1919,7 +2025,7 @@ def gerar_pdf_escala_folga_dominical(df_escala, titulo="Escala de Folga Dominica
 
 
 def pagina_escala_folga_dominical(modo="Gestor"):
-    st.subheader("Escala de Folga Dominical")
+    st.subheader(t("Escala de Folga Dominical"))
     st.caption("A geração usa a base de colaboradores, as colunas folga_dominical e gênero, e o histórico de Folga Dominical já salvo.")
 
     colaboradores = listar_colaboradores(ativos=True)
@@ -1932,11 +2038,11 @@ def pagina_escala_folga_dominical(modo="Gestor"):
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        ano = st.number_input("Ano", min_value=2020, max_value=2100, value=hoje.year, step=1, key=f"escala_ano_{modo}")
+        ano = st.number_input(t("Ano"), min_value=2020, max_value=2100, value=hoje.year, step=1, key=f"escala_ano_{modo}")
 
     with col2:
         mes = st.selectbox(
-            "Mês",
+            t("Mês"),
             list(range(1, 13)),
             index=hoje.month - 1,
             format_func=lambda x: f"{x:02d}",
@@ -1945,7 +2051,7 @@ def pagina_escala_folga_dominical(modo="Gestor"):
 
     with col3:
         responsavel = st.selectbox(
-            "Responsável",
+            t("Responsável"),
             opcoes_unicas(colaboradores, "gestor_responsavel", "Todos"),
             key=f"escala_responsavel_{modo}"
         )
@@ -2044,7 +2150,7 @@ def pagina_escala_folga_dominical(modo="Gestor"):
 # =========================
 
 def pagina_operacao_lancamento():
-    st.subheader("Lançamento de Presença")
+    st.subheader(t("Lançamento de Presença"))
     st.caption(f"Filial padrão: {FILIAL_PADRAO}")
 
     colaboradores = listar_colaboradores(ativos=True)
@@ -2056,11 +2162,11 @@ def pagina_operacao_lancamento():
     col1, col2 = st.columns([1, 2])
 
     with col1:
-        data_presenca = st.date_input("Data", value=date.today())
+        data_presenca = st.date_input(t("Data"), value=date.today())
 
     with col2:
         responsavel_selecionado = st.selectbox(
-            "Responsável",
+            t("Responsável"),
             opcoes_unicas(colaboradores, "gestor_responsavel", "Todos")
         )
 
@@ -2157,7 +2263,7 @@ def pagina_operacao_lancamento():
 
             with col5:
                 status = st.selectbox(
-                    "Status",
+                    t("Status"),
                     STATUS_PRESENCA,
                     index=index_status,
                     placeholder="Selecione",
@@ -2168,7 +2274,7 @@ def pagina_operacao_lancamento():
 
             with col6:
                 observacao = st.text_input(
-                    "Observação",
+                    t("Observação"),
                     value=observacao_atual,
                     key=f"obs_{row['id']}_{data_presenca}_{responsavel_selecionado}",
                     label_visibility="collapsed",
@@ -2222,7 +2328,7 @@ def pagina_operacao_lancamento():
 
 
 def pagina_operacao_historico():
-    st.subheader("Histórico de Presença")
+    st.subheader(t("Histórico de Presença"))
     st.caption(f"Filial padrão: {FILIAL_PADRAO}")
 
     colaboradores = listar_colaboradores(ativos=True)
@@ -2236,21 +2342,21 @@ def pagina_operacao_historico():
 
     with col1:
         data_inicio = st.date_input(
-            "Data inicial",
+            t("Data inicial"),
             value=date.today().replace(day=1),
             key="hist_data_inicio_op"
         )
 
     with col2:
         data_fim = st.date_input(
-            "Data final",
+            t("Data final"),
             value=date.today(),
             key="hist_data_fim_op"
         )
 
     with col3:
         responsavel = st.selectbox(
-            "Responsável",
+            t("Responsável"),
             opcoes_unicas(colaboradores, "gestor_responsavel", "Todos"),
             key="hist_responsavel_op"
         )
@@ -2325,12 +2431,12 @@ def pagina_operacao_historico():
 
 
 def pagina_operacao():
-    st.title("Operação - Presença RH")
+    st.title(t("Operação - Presença RH"))
 
     aba1, aba2, aba3 = st.tabs([
-        "Lançamento",
-        "Histórico",
-        "Escala Folga Dominical"
+        t("Lançamento"),
+        t("Histórico"),
+        t("Escala Folga Dominical")
     ])
 
     with aba1:
@@ -2348,20 +2454,20 @@ def pagina_operacao():
 # =========================
 
 def pagina_gestor():
-    st.title("Painel do Gestor - RH")
+    st.title(t("Painel do Gestor - RH"))
 
     aba1, aba2, aba3, aba4, aba5, aba6, aba7 = st.tabs([
-        "Dashboard",
-        "Importar Dados",
-        "Cadastrar / Alterar Pessoas",
-        "Colaboradores",
-        "Escala Folga Dominical",
-        "Exportar Excel",
-        "Acessos"
+        t("Dashboard"),
+        t("Importar Dados"),
+        t("Cadastrar / Alterar Pessoas"),
+        t("Colaboradores"),
+        t("Escala Folga Dominical"),
+        t("Exportar Excel"),
+        t("Acessos")
     ])
 
     with aba1:
-        st.subheader("Dashboard gerencial")
+        st.subheader(t("Dashboard gerencial"))
         st.caption(f"Filial padrão: {FILIAL_PADRAO}")
 
         colaboradores = listar_colaboradores(ativos=True)
@@ -2371,21 +2477,21 @@ def pagina_gestor():
 
         with colf1:
             data_inicio = st.date_input(
-                "Data inicial",
+                t("Data inicial"),
                 value=date.today().replace(day=1),
                 key="dash_data_inicio"
             )
 
         with colf2:
             data_fim = st.date_input(
-                "Data final",
+                t("Data final"),
                 value=date.today(),
                 key="dash_data_fim"
             )
 
         with colf3:
             responsavel = st.selectbox(
-                "Responsável",
+                t("Responsável"),
                 opcoes_unicas(colaboradores, "gestor_responsavel", "Todos"),
                 key="dash_responsavel"
             )
@@ -2445,7 +2551,7 @@ def pagina_gestor():
                         field="quantidade_pessoas",
                         order="descending"
                     ),
-                    title="Responsável",
+                    title=t("Responsável"),
                     axis=alt.Axis(labelAngle=-45)
                 ),
                 y=alt.Y(
@@ -2453,7 +2559,7 @@ def pagina_gestor():
                     title="Quantidade de pessoas"
                 ),
                 tooltip=[
-                    alt.Tooltip("gestor_responsavel:N", title="Responsável"),
+                    alt.Tooltip("gestor_responsavel:N", title=t("Responsável")),
                     alt.Tooltip("quantidade_pessoas:Q", title="Quantidade de pessoas")
                 ]
             ).properties(
@@ -2464,7 +2570,7 @@ def pagina_gestor():
 
             st.dataframe(
                 headcount_responsavel.rename(columns={
-                    "gestor_responsavel": "Responsável",
+                    "gestor_responsavel": t("Responsável"),
                     "quantidade_pessoas": "Quantidade de pessoas"
                 }),
                 use_container_width=True,
@@ -2492,7 +2598,7 @@ def pagina_gestor():
                         field="quantidade",
                         order="descending"
                     ),
-                    title="Status",
+                    title=t("Status"),
                     axis=alt.Axis(labelAngle=-45)
                 ),
                 y=alt.Y(
@@ -2500,7 +2606,7 @@ def pagina_gestor():
                     title="Quantidade"
                 ),
                 tooltip=[
-                    alt.Tooltip("status:N", title="Status"),
+                    alt.Tooltip("status:N", title=t("Status")),
                     alt.Tooltip("quantidade:Q", title="Quantidade")
                 ]
             ).properties(
@@ -2608,7 +2714,7 @@ def pagina_gestor():
             )
 
     with aba2:
-        st.subheader("Importar dados de colaboradores")
+        st.subheader(t("Importar dados de colaboradores"))
         st.caption(f"Filial padrão aplicada automaticamente: {FILIAL_PADRAO}")
 
         modelo_importacao = gerar_modelo_importacao()
@@ -2624,7 +2730,7 @@ def pagina_gestor():
         st.code("matricula | nome | jornada_trabalho | cargo | setor | logins_jms | gestor_responsavel | folga_dominical | genero | ativo")
 
         arquivo = st.file_uploader(
-            "Arquivo Excel",
+            t("Arquivo Excel"),
             type=["xlsx"]
         )
 
@@ -2635,11 +2741,11 @@ def pagina_gestor():
                 col_imp1, col_imp2 = st.columns(2)
 
                 with col_imp1:
-                    aba_excel = st.selectbox("Aba da planilha", excel.sheet_names)
+                    aba_excel = st.selectbox(t("Aba da planilha"), excel.sheet_names)
 
                 with col_imp2:
                     linha_cabecalho = st.number_input(
-                        "Linha onde está o cabeçalho",
+                        t("Linha onde está o cabeçalho"),
                         min_value=1,
                         value=1,
                         step=1
@@ -2682,8 +2788,8 @@ def pagina_gestor():
                             "ID existente",
                             disabled=True
                         ),
-                        "folga_dominical": st.column_config.SelectboxColumn("Folga Dominical", options=["Sim", "Não"]),
-                        "genero": st.column_config.SelectboxColumn("Gênero", options=["", "Feminino", "Masculino", "Outro"]),
+                        "folga_dominical": st.column_config.SelectboxColumn(t("Folga Dominical"), options=["Sim", "Não"]),
+                        "genero": st.column_config.SelectboxColumn(t("Gênero"), options=["", "Feminino", "Masculino", "Outro"]),
                         "ativo": st.column_config.CheckboxColumn("Ativo")
                     }
                 )
@@ -2717,7 +2823,7 @@ def pagina_gestor():
                 st.error(f"Erro ao importar planilha: {erro}")
 
     with aba3:
-        st.subheader("Cadastro e alteração de colaboradores")
+        st.subheader(t("Cadastro e alteração de colaboradores"))
         st.caption(f"Filial padrão: {FILIAL_PADRAO}")
 
         sub1, sub2 = st.tabs([
@@ -2730,17 +2836,17 @@ def pagina_gestor():
                 col1, col2 = st.columns(2)
 
                 with col1:
-                    matricula = st.text_input("Matrícula")
-                    nome = st.text_input("Nome")
-                    jornada_trabalho = st.text_input("Jornada de Trabalho")
-                    cargo = st.text_input("Cargo")
+                    matricula = st.text_input(t("Matrícula"))
+                    nome = st.text_input(t("Nome"))
+                    jornada_trabalho = st.text_input(t("Jornada de Trabalho"))
+                    cargo = st.text_input(t("Cargo"))
 
                 with col2:
-                    setor = st.text_input("Setor")
+                    setor = st.text_input(t("Setor"))
                     logins_jms = st.selectbox("Logins - JMS", ["Sim", "Não Precisa", "Não"])
-                    gestor_responsavel = st.text_input("Responsável")
-                    folga_dominical = st.selectbox("Folga Dominical", ["Sim", "Não"])
-                    genero = st.selectbox("Gênero", ["", "Feminino", "Masculino", "Outro"])
+                    gestor_responsavel = st.text_input(t("Responsável"))
+                    folga_dominical = st.selectbox(t("Folga Dominical"), ["Sim", "Não"])
+                    genero = st.selectbox(t("Gênero"), ["", "Feminino", "Masculino", "Outro"])
                     ativo = st.checkbox("Ativo", value=True)
 
                 salvar = st.form_submit_button("Cadastrar")
@@ -2800,25 +2906,25 @@ def pagina_gestor():
 
                         with col1:
                             nova_matricula = st.text_input(
-                                "Matrícula",
+                                t("Matrícula"),
                                 value=str(registro["matricula"])
                             )
                             novo_nome = st.text_input(
-                                "Nome",
+                                t("Nome"),
                                 value=str(registro["nome"])
                             )
                             nova_jornada = st.text_input(
-                                "Jornada de Trabalho",
+                                t("Jornada de Trabalho"),
                                 value=str(registro["jornada_trabalho"])
                             )
                             novo_cargo = st.text_input(
-                                "Cargo",
+                                t("Cargo"),
                                 value=str(registro["cargo"])
                             )
 
                         with col2:
                             novo_setor = st.text_input(
-                                "Setor",
+                                t("Setor"),
                                 value=str(registro["setor"])
                             )
                             novo_login = st.selectbox(
@@ -2829,18 +2935,18 @@ def pagina_gestor():
                                 else 0
                             )
                             novo_responsavel = st.text_input(
-                                "Responsável",
+                                t("Responsável"),
                                 value=str(registro["gestor_responsavel"])
                             )
                             novo_folga_dominical = st.selectbox(
-                                "Folga Dominical",
+                                t("Folga Dominical"),
                                 ["Sim", "Não"],
                                 index=["Sim", "Não"].index(str(registro.get("folga_dominical", "Sim")))
                                 if str(registro.get("folga_dominical", "Sim")) in ["Sim", "Não"]
                                 else 0
                             )
                             novo_genero = st.selectbox(
-                                "Gênero",
+                                t("Gênero"),
                                 ["", "Feminino", "Masculino", "Outro"],
                                 index=["", "Feminino", "Masculino", "Outro"].index(str(registro.get("genero", "")))
                                 if str(registro.get("genero", "")) in ["", "Feminino", "Masculino", "Outro"]
@@ -2873,7 +2979,7 @@ def pagina_gestor():
                                 st.success("Cadastro alterado com sucesso.")
 
     with aba4:
-        st.subheader("Base de colaboradores")
+        st.subheader(t("Base de colaboradores"))
         st.caption("Edite os dados e clique em salvar alterações. A filial permanece MG CGE.")
 
         df_colaboradores = listar_colaboradores(ativos=False)
@@ -2904,8 +3010,8 @@ def pagina_gestor():
                     column_config={
                         "id": st.column_config.NumberColumn("ID", disabled=True),
                         "filial": st.column_config.TextColumn("Filial", disabled=True),
-                        "folga_dominical": st.column_config.SelectboxColumn("Folga Dominical", options=["Sim", "Não"]),
-                        "genero": st.column_config.SelectboxColumn("Gênero", options=["", "Feminino", "Masculino", "Outro"]),
+                        "folga_dominical": st.column_config.SelectboxColumn(t("Folga Dominical"), options=["Sim", "Não"]),
+                        "genero": st.column_config.SelectboxColumn(t("Gênero"), options=["", "Feminino", "Masculino", "Outro"]),
                         "ativo": st.column_config.CheckboxColumn("Ativo")
                     }
                 )
@@ -2924,7 +3030,7 @@ def pagina_gestor():
         pagina_escala_folga_dominical(modo="Gestor")
 
     with aba6:
-        st.subheader("Exportar Excel")
+        st.subheader(t("Exportar Excel"))
 
         df = carregar_presencas()
         colaboradores = listar_colaboradores(ativos=True)
@@ -2939,7 +3045,7 @@ def pagina_gestor():
 
             with col2:
                 responsavel = st.selectbox(
-                    "Responsável",
+                    t("Responsável"),
                     opcoes_unicas(colaboradores, "gestor_responsavel", "Todos"),
                     key="export_responsavel"
                 )
@@ -2976,7 +3082,7 @@ def pagina_gestor():
                 )
 
     with aba7:
-        st.subheader("Gestão de acessos")
+        st.subheader(t("Gestão de acessos"))
 
         col1, col2 = st.columns(2)
 
@@ -2984,8 +3090,8 @@ def pagina_gestor():
             st.markdown("**Criar novo acesso**")
 
             with st.form("form_criar_acesso"):
-                novo_usuario = st.text_input("Usuário")
-                nova_senha = st.text_input("Senha", type="password")
+                novo_usuario = st.text_input(t("Usuário"))
+                nova_senha = st.text_input(t("Senha"), type="password")
                 novo_perfil = st.selectbox("Perfil", PERFIS_USUARIO)
 
                 criar_acesso = st.form_submit_button("Criar acesso")
@@ -3096,11 +3202,12 @@ if "logado" not in st.session_state:
 if not st.session_state["logado"]:
     login()
 else:
-    st.sidebar.write(f"Usuário: **{st.session_state['usuario']}**")
-    st.sidebar.write(f"Perfil: **{st.session_state['perfil']}**")
-    st.sidebar.write(f"Filial: **{FILIAL_PADRAO}**")
+    seletor_idioma("idioma_sidebar")
+    st.sidebar.write(f"{t("Usuário")}: **{st.session_state['usuario']}**")
+    st.sidebar.write(f"{t("Perfil")}: **{st.session_state['perfil']}**")
+    st.sidebar.write(f"{t("Filial")}: **{FILIAL_PADRAO}**")
 
-    if st.sidebar.button("Sair"):
+    if st.sidebar.button(t("Sair")):
         st.session_state.clear()
         st.rerun()
 
