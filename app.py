@@ -3,13 +3,18 @@ import os
 import psycopg2
 import pandas as pd
 from urllib.parse import urlparse, urlunparse
-from datetime import date
+from datetime import date, timedelta
 from io import BytesIO
 from pathlib import Path
 from openpyxl import Workbook, load_workbook
 import unicodedata
 import hashlib
 import altair as alt
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+
 
 
 # =========================
@@ -52,6 +57,8 @@ COLUNAS_IMPORTACAO = [
     "setor",
     "logins_jms",
     "gestor_responsavel",
+    "folga_dominical",
+    "genero",
     "ativo"
 ]
 
@@ -352,6 +359,8 @@ def criar_tabelas():
             filial TEXT DEFAULT 'MG CGE',
             logins_jms TEXT,
             gestor_responsavel TEXT,
+            folga_dominical TEXT,
+            genero TEXT,
             ativo INTEGER DEFAULT 1
         )
     """)
@@ -368,6 +377,18 @@ def criar_tabelas():
         )
     """)
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS escalas_folga_dominical (
+            id BIGSERIAL PRIMARY KEY,
+            colaborador_id BIGINT NOT NULL REFERENCES colaboradores(id) ON DELETE CASCADE,
+            data_domingo DATE NOT NULL,
+            status TEXT DEFAULT 'Folga Dominical',
+            motivo_regra TEXT,
+            criado_em TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            atualizado_em TIMESTAMPTZ
+        )
+    """)
+
     garantir_coluna(cursor, "colaboradores", "matricula", "TEXT")
     garantir_coluna(cursor, "colaboradores", "jornada_trabalho", "TEXT")
     garantir_coluna(cursor, "colaboradores", "cargo", "TEXT")
@@ -375,12 +396,24 @@ def criar_tabelas():
     garantir_coluna(cursor, "colaboradores", "filial", "TEXT DEFAULT 'MG CGE'")
     garantir_coluna(cursor, "colaboradores", "logins_jms", "TEXT")
     garantir_coluna(cursor, "colaboradores", "gestor_responsavel", "TEXT")
+    garantir_coluna(cursor, "colaboradores", "folga_dominical", "TEXT")
+    garantir_coluna(cursor, "colaboradores", "genero", "TEXT")
     garantir_coluna(cursor, "colaboradores", "ativo", "INTEGER DEFAULT 1")
 
     garantir_coluna(cursor, "presencas", "status", "TEXT")
     garantir_coluna(cursor, "presencas", "observacao", "TEXT")
     garantir_coluna(cursor, "presencas", "criado_em", "TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP")
     garantir_coluna(cursor, "presencas", "atualizado_em", "TIMESTAMPTZ")
+
+    garantir_coluna(cursor, "escalas_folga_dominical", "status", "TEXT DEFAULT 'Folga Dominical'")
+    garantir_coluna(cursor, "escalas_folga_dominical", "motivo_regra", "TEXT")
+    garantir_coluna(cursor, "escalas_folga_dominical", "criado_em", "TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP")
+    garantir_coluna(cursor, "escalas_folga_dominical", "atualizado_em", "TIMESTAMPTZ")
+
+    cursor.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_escala_folga_dominical_colaborador_data
+        ON escalas_folga_dominical (colaborador_id, data_domingo)
+    """)
 
     cursor.execute("""
         INSERT INTO usuarios (
@@ -582,6 +615,8 @@ def cadastrar_colaborador(
     setor,
     logins_jms,
     gestor_responsavel,
+    folga_dominical,
+    genero,
     ativo=1
 ):
     conn = conectar()
@@ -597,9 +632,11 @@ def cadastrar_colaborador(
             filial,
             logins_jms,
             gestor_responsavel,
+            folga_dominical,
+            genero,
             ativo
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
         str(matricula).strip(),
         str(nome).strip(),
@@ -609,6 +646,8 @@ def cadastrar_colaborador(
         FILIAL_PADRAO,
         str(logins_jms).strip(),
         str(gestor_responsavel).strip(),
+        str(folga_dominical).strip(),
+        str(genero).strip(),
         converter_ativo(ativo)
     ))
 
@@ -625,6 +664,8 @@ def atualizar_colaborador(
     setor,
     logins_jms,
     gestor_responsavel,
+    folga_dominical,
+    genero,
     ativo
 ):
     conn = conectar()
@@ -641,6 +682,8 @@ def atualizar_colaborador(
             filial = %s,
             logins_jms = %s,
             gestor_responsavel = %s,
+            folga_dominical = %s,
+            genero = %s,
             ativo = %s
         WHERE id = %s
     """, (
@@ -652,6 +695,8 @@ def atualizar_colaborador(
         FILIAL_PADRAO,
         str(logins_jms).strip(),
         str(gestor_responsavel).strip(),
+        str(folga_dominical).strip(),
+        str(genero).strip(),
         converter_ativo(ativo),
         int(colaborador_id)
     ))
@@ -674,6 +719,8 @@ def listar_colaboradores(ativos=True):
             filial,
             logins_jms,
             gestor_responsavel,
+            folga_dominical,
+            genero,
             ativo
         FROM colaboradores
     """
@@ -716,6 +763,8 @@ def salvar_edicao_colaboradores(df):
         setor = str(row.get("setor", "")).strip()
         logins_jms = str(row.get("logins_jms", "")).strip()
         gestor_responsavel = str(row.get("gestor_responsavel", "")).strip()
+        folga_dominical = str(row.get("folga_dominical", "")).strip()
+        genero = str(row.get("genero", "")).strip()
         ativo = converter_ativo(row.get("ativo", 1))
 
         if pd.notna(colaborador_id) and str(colaborador_id).strip() != "":
@@ -733,6 +782,8 @@ def salvar_edicao_colaboradores(df):
                         filial = %s,
                         logins_jms = %s,
                         gestor_responsavel = %s,
+                        folga_dominical = %s,
+                        genero = %s,
                         ativo = %s
                     WHERE id = %s
                 """, (
@@ -744,6 +795,8 @@ def salvar_edicao_colaboradores(df):
                     FILIAL_PADRAO,
                     logins_jms,
                     gestor_responsavel,
+                    folga_dominical,
+                    genero,
                     ativo,
                     colaborador_id
                 ))
@@ -764,9 +817,11 @@ def salvar_edicao_colaboradores(df):
                     filial,
                     logins_jms,
                     gestor_responsavel,
+                    folga_dominical,
+                    genero,
                     ativo
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 matricula,
                 nome,
@@ -776,6 +831,8 @@ def salvar_edicao_colaboradores(df):
                 FILIAL_PADRAO,
                 logins_jms,
                 gestor_responsavel,
+                folga_dominical,
+                genero,
                 ativo
             ))
 
@@ -853,6 +910,16 @@ def preparar_dataframe_importacao(df_original):
         "supervisor": "gestor_responsavel",
         "lider": "gestor_responsavel",
         "líder": "gestor_responsavel",
+
+        "folga dominical": "folga_dominical",
+        "folga_dominical": "folga_dominical",
+        "domingo": "folga_dominical",
+        "escala domingo": "folga_dominical",
+        "escala dominical": "folga_dominical",
+
+        "genero": "genero",
+        "gênero": "genero",
+        "sexo": "genero",
 
         "ativo": "ativo",
         "situacao": "ativo",
@@ -964,6 +1031,8 @@ def importar_colaboradores(df, atualizar_existentes=True, atualizacao_incrementa
         setor = str(row.get("setor", "")).strip()
         logins_jms = str(row.get("logins_jms", "")).strip()
         gestor_responsavel = str(row.get("gestor_responsavel", "")).strip()
+        folga_dominical = str(row.get("folga_dominical", "")).strip()
+        genero = str(row.get("genero", "")).strip()
         ativo = converter_ativo(row.get("ativo", 1))
 
         if not nome:
@@ -986,6 +1055,8 @@ def importar_colaboradores(df, atualizar_existentes=True, atualizacao_incrementa
                         setor,
                         logins_jms,
                         gestor_responsavel,
+                        folga_dominical,
+                        genero,
                         ativo
                     FROM colaboradores
                     WHERE id = %s
@@ -1004,6 +1075,8 @@ def importar_colaboradores(df, atualizar_existentes=True, atualizacao_incrementa
                         setor,
                         logins_jms,
                         gestor_responsavel,
+                        folga_dominical,
+                        genero,
                         ativo
                     FROM colaboradores
                     WHERE LOWER(TRIM(matricula)) = LOWER(TRIM(%s))
@@ -1022,6 +1095,8 @@ def importar_colaboradores(df, atualizar_existentes=True, atualizacao_incrementa
                         setor,
                         logins_jms,
                         gestor_responsavel,
+                        folga_dominical,
+                        genero,
                         ativo
                     FROM colaboradores
                     WHERE LOWER(TRIM(nome)) = LOWER(TRIM(%s))
@@ -1040,6 +1115,8 @@ def importar_colaboradores(df, atualizar_existentes=True, atualizacao_incrementa
                 setor_final = setor if setor else existente[5]
                 logins_final = logins_jms if logins_jms else existente[6]
                 gestor_final = gestor_responsavel if gestor_responsavel else existente[7]
+                folga_final = folga_dominical if folga_dominical else existente[8]
+                genero_final = genero if genero else existente[9]
                 ativo_final = ativo
             else:
                 matricula_final = matricula
@@ -1049,6 +1126,8 @@ def importar_colaboradores(df, atualizar_existentes=True, atualizacao_incrementa
                 setor_final = setor
                 logins_final = logins_jms
                 gestor_final = gestor_responsavel
+                folga_final = folga_dominical
+                genero_final = genero
                 ativo_final = ativo
 
             cursor.execute("""
@@ -1062,6 +1141,8 @@ def importar_colaboradores(df, atualizar_existentes=True, atualizacao_incrementa
                     filial = %s,
                     logins_jms = %s,
                     gestor_responsavel = %s,
+                    folga_dominical = %s,
+                    genero = %s,
                     ativo = %s
                 WHERE id = %s
             """, (
@@ -1073,6 +1154,8 @@ def importar_colaboradores(df, atualizar_existentes=True, atualizacao_incrementa
                 FILIAL_PADRAO,
                 logins_final,
                 gestor_final,
+                folga_final,
+                genero_final,
                 ativo_final,
                 colaborador_id
             ))
@@ -1090,9 +1173,11 @@ def importar_colaboradores(df, atualizar_existentes=True, atualizacao_incrementa
                     filial,
                     logins_jms,
                     gestor_responsavel,
+                    folga_dominical,
+                    genero,
                     ativo
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 matricula,
                 nome,
@@ -1102,6 +1187,8 @@ def importar_colaboradores(df, atualizar_existentes=True, atualizacao_incrementa
                 FILIAL_PADRAO,
                 logins_jms,
                 gestor_responsavel,
+                folga_dominical,
+                genero,
                 ativo
             ))
 
@@ -1128,6 +1215,8 @@ def gerar_modelo_importacao():
             "setor": "Administrativo",
             "logins_jms": "Sim",
             "gestor_responsavel": "Nome do Responsável",
+            "folga_dominical": "Sim",
+            "genero": "Feminino",
             "ativo": True
         }
     ])
@@ -1162,6 +1251,8 @@ def carregar_presencas():
             c.filial,
             c.logins_jms,
             c.gestor_responsavel,
+            c.folga_dominical,
+            c.genero,
             p.status,
             p.observacao,
             p.criado_em,
@@ -1490,8 +1581,10 @@ def gerar_excel_modelo(df, data_ref, responsavel):
     ws["E6"] = "Cargo"
     ws["F6"] = "Setor"
     ws["G6"] = "Logins - JMS"
-    ws["H6"] = "Status"
-    ws["I6"] = "Observação"
+    ws["H6"] = "Folga Dominical"
+    ws["I6"] = "Gênero"
+    ws["J6"] = "Status"
+    ws["K6"] = "Observação"
 
     linha_inicial = 7
     df = df.reset_index(drop=True)
@@ -1506,8 +1599,10 @@ def gerar_excel_modelo(df, data_ref, responsavel):
         ws[f"E{linha}"] = row.get("cargo", "")
         ws[f"F{linha}"] = row.get("setor", "")
         ws[f"G{linha}"] = row.get("logins_jms", "")
-        ws[f"H{linha}"] = row.get("status", "")
-        ws[f"I{linha}"] = row.get("observacao", "")
+        ws[f"H{linha}"] = row.get("folga_dominical", "")
+        ws[f"I{linha}"] = row.get("genero", "")
+        ws[f"J{linha}"] = row.get("status", "")
+        ws[f"K{linha}"] = row.get("observacao", "")
 
     arquivo = BytesIO()
     wb.save(arquivo)
@@ -1537,6 +1632,412 @@ def login():
         else:
             st.error("Usuário ou senha inválidos.")
 
+
+
+# =========================
+# ESCALA DE FOLGA DOMINICAL
+# =========================
+
+def valor_positivo_folga_dominical(valor):
+    texto = normalizar_texto(valor)
+    return texto in ["sim", "s", "1", "true", "verdadeiro", "folga", "folga dominical"]
+
+
+def normalizar_genero_operacional(valor):
+    texto = normalizar_texto(valor)
+    if texto in ["f", "fem", "feminino", "mulher"]:
+        return "Feminino"
+    if texto in ["m", "masc", "masculino", "homem"]:
+        return "Masculino"
+    if texto in ["outro", "outros", "nao informado", "não informado"]:
+        return "Outro"
+    return str(valor).strip() if str(valor).strip() else "Não informado"
+
+
+def domingos_do_mes(ano, mes):
+    primeiro_dia = date(int(ano), int(mes), 1)
+    if mes == 12:
+        proximo_mes = date(int(ano) + 1, 1, 1)
+    else:
+        proximo_mes = date(int(ano), int(mes) + 1, 1)
+
+    dias = []
+    dia = primeiro_dia
+    while dia < proximo_mes:
+        if dia.weekday() == 6:
+            dias.append(dia)
+        dia += timedelta(days=1)
+    return dias
+
+
+def obter_historico_folga_dominical(data_limite):
+    conn = conectar()
+    df = pd.read_sql_query("""
+        SELECT colaborador_id, data
+        FROM presencas
+        WHERE status = 'Folga Dominical'
+          AND data < %s
+        ORDER BY colaborador_id, data DESC
+    """, conn, params=(str(data_limite),))
+    conn.close()
+
+    if df.empty:
+        return {}
+
+    df["data"] = pd.to_datetime(df["data"], errors="coerce").dt.date
+    df = df.dropna(subset=["data"])
+    return df.groupby("colaborador_id")["data"].max().to_dict()
+
+
+def obter_escala_folga_dominical(data_inicio, data_fim, responsavel="Todos"):
+    conn = conectar()
+    query = """
+        SELECT
+            e.id,
+            e.colaborador_id,
+            e.data_domingo,
+            c.matricula,
+            c.nome,
+            c.cargo,
+            c.setor,
+            c.gestor_responsavel,
+            c.folga_dominical,
+            c.genero,
+            e.status,
+            e.motivo_regra,
+            e.criado_em,
+            e.atualizado_em
+        FROM escalas_folga_dominical e
+        INNER JOIN colaboradores c ON c.id = e.colaborador_id
+        WHERE e.data_domingo BETWEEN %s AND %s
+    """
+    params = [str(data_inicio), str(data_fim)]
+
+    if responsavel != "Todos":
+        query += " AND c.gestor_responsavel = %s"
+        params.append(responsavel)
+
+    query += " ORDER BY e.data_domingo, c.gestor_responsavel, c.nome"
+
+    df = pd.read_sql_query(query, conn, params=params)
+    conn.close()
+    return df
+
+
+def gerar_escala_folga_dominical(colaboradores_base, ano, mes, responsavel="Todos"):
+    domingos = domingos_do_mes(ano, mes)
+
+    if not domingos or colaboradores_base.empty:
+        return pd.DataFrame()
+
+    primeiro_dia_mes = date(int(ano), int(mes), 1)
+    ids_desligados_antes = obter_ids_desligados_antes(primeiro_dia_mes)
+
+    df = colaboradores_base.copy()
+    df = df[~df["id"].isin(ids_desligados_antes)].copy()
+
+    if responsavel != "Todos":
+        df = df[df["gestor_responsavel"] == responsavel].copy()
+
+    if df.empty:
+        return pd.DataFrame()
+
+    df["folga_dominical_flag"] = df["folga_dominical"].apply(valor_positivo_folga_dominical)
+    df = df[df["folga_dominical_flag"]].copy()
+
+    if df.empty:
+        return pd.DataFrame()
+
+    historico_ultima_folga = obter_historico_folga_dominical(primeiro_dia_mes)
+    registros = []
+
+    for _, row in df.iterrows():
+        colaborador_id = row["id"]
+        genero = normalizar_genero_operacional(row.get("genero", ""))
+        ultima_folga = historico_ultima_folga.get(colaborador_id)
+
+        if genero == "Feminino":
+            domingos_colaborador = []
+            for domingo in domingos:
+                if ultima_folga is None or (domingo - ultima_folga).days >= 14:
+                    domingos_colaborador.append(domingo)
+                    ultima_folga = domingo
+            motivo = "Regra operacional: folga dominical em ciclo quinzenal para gênero feminino."
+        else:
+            domingos_colaborador = [domingos[0]]
+            motivo = "Regra operacional: uma folga dominical mensal, sem limite por responsável."
+
+        for domingo in domingos_colaborador:
+            registros.append({
+                "data_domingo": domingo,
+                "matricula": row.get("matricula", ""),
+                "nome": row.get("nome", ""),
+                "cargo": row.get("cargo", ""),
+                "setor": row.get("setor", ""),
+                "responsavel": row.get("gestor_responsavel", ""),
+                "folga_dominical": row.get("folga_dominical", ""),
+                "genero": genero,
+                "status": "Folga Dominical",
+                "motivo_regra": motivo,
+                "colaborador_id": colaborador_id
+            })
+
+    escala = pd.DataFrame(registros)
+
+    if escala.empty:
+        return escala
+
+    return escala.sort_values(["data_domingo", "responsavel", "nome"]).reset_index(drop=True)
+
+
+def salvar_escala_folga_dominical(df_escala):
+    if df_escala.empty:
+        return {"gerados": 0, "presencas_atualizadas": 0}
+
+    conn = conectar()
+    cursor = conn.cursor()
+    gerados = 0
+    presencas_atualizadas = 0
+
+    for _, row in df_escala.iterrows():
+        colaborador_id = int(row["colaborador_id"])
+        data_domingo = str(row["data_domingo"])
+        motivo = str(row.get("motivo_regra", ""))
+        observacao = "Gerado pela escala de folga dominical."
+
+        cursor.execute("""
+            INSERT INTO escalas_folga_dominical (
+                colaborador_id,
+                data_domingo,
+                status,
+                motivo_regra
+            )
+            VALUES (%s, %s, 'Folga Dominical', %s)
+            ON CONFLICT (colaborador_id, data_domingo)
+            DO UPDATE SET
+                status = 'Folga Dominical',
+                motivo_regra = EXCLUDED.motivo_regra,
+                atualizado_em = CURRENT_TIMESTAMP
+        """, (colaborador_id, data_domingo, motivo))
+        gerados += 1
+
+        cursor.execute("""
+            INSERT INTO presencas (
+                colaborador_id,
+                data,
+                status,
+                observacao
+            )
+            VALUES (%s, %s, 'Folga Dominical', %s)
+            ON CONFLICT (colaborador_id, data)
+            DO UPDATE SET
+                status = 'Folga Dominical',
+                observacao = EXCLUDED.observacao,
+                atualizado_em = CURRENT_TIMESTAMP
+        """, (colaborador_id, data_domingo, observacao))
+        presencas_atualizadas += 1
+
+    conn.commit()
+    conn.close()
+
+    return {"gerados": gerados, "presencas_atualizadas": presencas_atualizadas}
+
+
+def gerar_excel_escala_folga_dominical(df_escala):
+    arquivo = BytesIO()
+    df_export = df_escala.copy()
+
+    if not df_export.empty:
+        df_export["data_domingo"] = pd.to_datetime(df_export["data_domingo"]).dt.strftime("%d/%m/%Y")
+        df_export = df_export.rename(columns={
+            "data_domingo": "Data Domingo",
+            "matricula": "Matrícula",
+            "nome": "Nome",
+            "cargo": "Cargo",
+            "setor": "Setor",
+            "responsavel": "Responsável",
+            "folga_dominical": "Folga Dominical",
+            "genero": "Gênero",
+            "status": "Status",
+            "motivo_regra": "Regra Aplicada"
+        })
+        colunas = [
+            "Data Domingo", "Matrícula", "Nome", "Cargo", "Setor",
+            "Responsável", "Folga Dominical", "Gênero", "Status", "Regra Aplicada"
+        ]
+        df_export = df_export[[col for col in colunas if col in df_export.columns]]
+
+    with pd.ExcelWriter(arquivo, engine="openpyxl") as writer:
+        df_export.to_excel(writer, index=False, sheet_name="Escala Folga Dominical")
+
+    arquivo.seek(0)
+    return arquivo
+
+
+def gerar_pdf_escala_folga_dominical(df_escala, titulo="Escala de Folga Dominical"):
+    arquivo = BytesIO()
+    doc = SimpleDocTemplate(
+        arquivo,
+        pagesize=landscape(A4),
+        rightMargin=18,
+        leftMargin=18,
+        topMargin=18,
+        bottomMargin=18
+    )
+
+    styles = getSampleStyleSheet()
+    elementos = [Paragraph(titulo, styles["Title"]), Spacer(1, 10)]
+
+    if df_escala.empty:
+        elementos.append(Paragraph("Nenhum registro encontrado para os filtros selecionados.", styles["Normal"]))
+    else:
+        df_pdf = df_escala.copy()
+        df_pdf["data_domingo"] = pd.to_datetime(df_pdf["data_domingo"]).dt.strftime("%d/%m/%Y")
+        colunas = ["data_domingo", "matricula", "nome", "cargo", "responsavel", "genero", "status"]
+        headers = ["Data", "Matrícula", "Nome", "Cargo", "Responsável", "Gênero", "Status"]
+        dados = [headers]
+
+        for _, row in df_pdf[colunas].iterrows():
+            dados.append([str(row.get(col, "")) for col in colunas])
+
+        tabela = Table(dados, repeatRows=1, colWidths=[58, 62, 165, 130, 100, 70, 95])
+        tabela.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8E8E8")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F7F7F7")]),
+        ]))
+        elementos.append(tabela)
+
+    doc.build(elementos)
+    arquivo.seek(0)
+    return arquivo
+
+
+def pagina_escala_folga_dominical(modo="Gestor"):
+    st.subheader("Escala de Folga Dominical")
+    st.caption("A geração usa a base de colaboradores, as colunas folga_dominical e gênero, e o histórico de Folga Dominical já salvo.")
+
+    colaboradores = listar_colaboradores(ativos=True)
+
+    if colaboradores.empty:
+        st.warning("Nenhum colaborador cadastrado.")
+        return
+
+    hoje = date.today()
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        ano = st.number_input("Ano", min_value=2020, max_value=2100, value=hoje.year, step=1, key=f"escala_ano_{modo}")
+
+    with col2:
+        mes = st.selectbox(
+            "Mês",
+            list(range(1, 13)),
+            index=hoje.month - 1,
+            format_func=lambda x: f"{x:02d}",
+            key=f"escala_mes_{modo}"
+        )
+
+    with col3:
+        responsavel = st.selectbox(
+            "Responsável",
+            opcoes_unicas(colaboradores, "gestor_responsavel", "Todos"),
+            key=f"escala_responsavel_{modo}"
+        )
+
+    primeiro_dia = date(int(ano), int(mes), 1)
+    if int(mes) == 12:
+        ultimo_dia = date(int(ano), 12, 31)
+    else:
+        ultimo_dia = date(int(ano), int(mes) + 1, 1) - timedelta(days=1)
+
+    if modo == "Gestor":
+        escala_previa = gerar_escala_folga_dominical(colaboradores, int(ano), int(mes), responsavel)
+
+        if escala_previa.empty:
+            st.warning("Nenhuma escala gerada. Verifique se a coluna folga_dominical está como Sim para os colaboradores elegíveis.")
+            return
+
+        st.metric("Registros previstos", len(escala_previa))
+
+        st.dataframe(
+            escala_previa.drop(columns=["colaborador_id"], errors="ignore"),
+            use_container_width=True,
+            hide_index=True
+        )
+
+        colb1, colb2, colb3 = st.columns(3)
+
+        with colb1:
+            if st.button("Gravar escala no histórico", key=f"salvar_escala_{modo}"):
+                resultado = salvar_escala_folga_dominical(escala_previa)
+                st.success(
+                    f"Escala gravada. Registros da escala: {resultado['gerados']} | "
+                    f"Presenças atualizadas: {resultado['presencas_atualizadas']}"
+                )
+                st.rerun()
+
+        with colb2:
+            excel = gerar_excel_escala_folga_dominical(escala_previa)
+            st.download_button(
+                "Baixar Excel",
+                data=excel,
+                file_name=f"escala_folga_dominical_{ano}_{int(mes):02d}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key=f"download_excel_escala_{modo}"
+            )
+
+        with colb3:
+            pdf = gerar_pdf_escala_folga_dominical(
+                escala_previa,
+                titulo=f"Escala de Folga Dominical - {int(mes):02d}/{ano}"
+            )
+            st.download_button(
+                "Baixar PDF paisagem",
+                data=pdf,
+                file_name=f"escala_folga_dominical_{ano}_{int(mes):02d}.pdf",
+                mime="application/pdf",
+                key=f"download_pdf_escala_{modo}"
+            )
+
+    else:
+        escala_salva = obter_escala_folga_dominical(primeiro_dia, ultimo_dia, responsavel)
+
+        if escala_salva.empty:
+            st.warning("Nenhuma escala salva para o período selecionado.")
+            return
+
+        st.metric("Registros salvos", len(escala_salva))
+        st.dataframe(escala_salva, use_container_width=True, hide_index=True)
+
+        excel = gerar_excel_escala_folga_dominical(escala_salva.rename(columns={"data_domingo": "data_domingo", "gestor_responsavel": "responsavel"}))
+        pdf = gerar_pdf_escala_folga_dominical(
+            escala_salva.rename(columns={"gestor_responsavel": "responsavel"}),
+            titulo=f"Escala de Folga Dominical - {int(mes):02d}/{ano}"
+        )
+
+        colb1, colb2 = st.columns(2)
+        with colb1:
+            st.download_button(
+                "Baixar Excel",
+                data=excel,
+                file_name=f"escala_folga_dominical_{ano}_{int(mes):02d}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key=f"download_excel_escala_{modo}"
+            )
+        with colb2:
+            st.download_button(
+                "Baixar PDF paisagem",
+                data=pdf,
+                file_name=f"escala_folga_dominical_{ano}_{int(mes):02d}.pdf",
+                mime="application/pdf",
+                key=f"download_pdf_escala_{modo}"
+            )
 
 # =========================
 # OPERAÇÃO
@@ -1826,9 +2327,10 @@ def pagina_operacao_historico():
 def pagina_operacao():
     st.title("Operação - Presença RH")
 
-    aba1, aba2 = st.tabs([
+    aba1, aba2, aba3 = st.tabs([
         "Lançamento",
-        "Histórico"
+        "Histórico",
+        "Escala Folga Dominical"
     ])
 
     with aba1:
@@ -1836,6 +2338,9 @@ def pagina_operacao():
 
     with aba2:
         pagina_operacao_historico()
+
+    with aba3:
+        pagina_escala_folga_dominical(modo="Operação")
 
 
 # =========================
@@ -1845,10 +2350,11 @@ def pagina_operacao():
 def pagina_gestor():
     st.title("Painel do Gestor - RH")
 
-    aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
+    aba1, aba2, aba3, aba4, aba5, aba6, aba7 = st.tabs([
         "Cadastrar / Alterar Pessoas",
         "Importar Dados",
         "Colaboradores",
+        "Escala Folga Dominical",
         "Dashboard",
         "Exportar Excel",
         "Acessos"
@@ -1877,6 +2383,8 @@ def pagina_gestor():
                     setor = st.text_input("Setor")
                     logins_jms = st.selectbox("Logins - JMS", ["Sim", "Não Precisa", "Não"])
                     gestor_responsavel = st.text_input("Responsável")
+                    folga_dominical = st.selectbox("Folga Dominical", ["Sim", "Não"])
+                    genero = st.selectbox("Gênero", ["", "Feminino", "Masculino", "Outro"])
                     ativo = st.checkbox("Ativo", value=True)
 
                 salvar = st.form_submit_button("Cadastrar")
@@ -1893,6 +2401,8 @@ def pagina_gestor():
                             setor,
                             logins_jms,
                             gestor_responsavel,
+                            folga_dominical,
+                            genero,
                             ativo
                         )
                         st.success("Colaborador cadastrado com sucesso.")
@@ -1966,6 +2476,20 @@ def pagina_gestor():
                                 "Responsável",
                                 value=str(registro["gestor_responsavel"])
                             )
+                            novo_folga_dominical = st.selectbox(
+                                "Folga Dominical",
+                                ["Sim", "Não"],
+                                index=["Sim", "Não"].index(str(registro.get("folga_dominical", "Sim")))
+                                if str(registro.get("folga_dominical", "Sim")) in ["Sim", "Não"]
+                                else 0
+                            )
+                            novo_genero = st.selectbox(
+                                "Gênero",
+                                ["", "Feminino", "Masculino", "Outro"],
+                                index=["", "Feminino", "Masculino", "Outro"].index(str(registro.get("genero", "")))
+                                if str(registro.get("genero", "")) in ["", "Feminino", "Masculino", "Outro"]
+                                else 0
+                            )
                             novo_ativo = st.checkbox(
                                 "Ativo",
                                 value=bool(int(registro["ativo"])) if str(registro["ativo"]).isdigit() else bool(registro["ativo"])
@@ -1986,6 +2510,8 @@ def pagina_gestor():
                                     novo_setor,
                                     novo_login,
                                     novo_responsavel,
+                                    novo_folga_dominical,
+                                    novo_genero,
                                     novo_ativo
                                 )
                                 st.success("Cadastro alterado com sucesso.")
@@ -2004,7 +2530,7 @@ def pagina_gestor():
         )
 
         st.markdown("**Colunas recomendadas:**")
-        st.code("matricula | nome | jornada_trabalho | cargo | setor | logins_jms | gestor_responsavel | ativo")
+        st.code("matricula | nome | jornada_trabalho | cargo | setor | logins_jms | gestor_responsavel | folga_dominical | genero | ativo")
 
         arquivo = st.file_uploader(
             "Arquivo Excel",
@@ -2065,6 +2591,8 @@ def pagina_gestor():
                             "ID existente",
                             disabled=True
                         ),
+                        "folga_dominical": st.column_config.SelectboxColumn("Folga Dominical", options=["Sim", "Não"]),
+                        "genero": st.column_config.SelectboxColumn("Gênero", options=["", "Feminino", "Masculino", "Outro"]),
                         "ativo": st.column_config.CheckboxColumn("Ativo")
                     }
                 )
@@ -2129,6 +2657,8 @@ def pagina_gestor():
                     column_config={
                         "id": st.column_config.NumberColumn("ID", disabled=True),
                         "filial": st.column_config.TextColumn("Filial", disabled=True),
+                        "folga_dominical": st.column_config.SelectboxColumn("Folga Dominical", options=["Sim", "Não"]),
+                        "genero": st.column_config.SelectboxColumn("Gênero", options=["", "Feminino", "Masculino", "Outro"]),
                         "ativo": st.column_config.CheckboxColumn("Ativo")
                     }
                 )
@@ -2144,6 +2674,9 @@ def pagina_gestor():
                     )
 
     with aba4:
+        pagina_escala_folga_dominical(modo="Gestor")
+
+    with aba5:
         st.subheader("Dashboard gerencial")
         st.caption(f"Filial padrão: {FILIAL_PADRAO}")
 
@@ -2390,7 +2923,7 @@ def pagina_gestor():
                 hide_index=True
             )
 
-    with aba5:
+    with aba6:
         st.subheader("Exportar Excel")
 
         df = carregar_presencas()
@@ -2442,7 +2975,7 @@ def pagina_gestor():
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
 
-    with aba6:
+    with aba7:
         st.subheader("Gestão de acessos")
 
         col1, col2 = st.columns(2)
