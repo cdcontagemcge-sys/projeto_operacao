@@ -1316,38 +1316,39 @@ def obter_ids_desligados_antes(data_referencia):
     return set(df["colaborador_id"].tolist())
 
 
-def obter_desligados_vigentes_no_mes(data_referencia):
+def obter_desligados_sugeridos_no_mes(data_presenca):
     """
-    Retorna colaboradores que tiveram status Desligado lançado no mesmo mês
-    até a data selecionada.
-
-    Uso operacional:
-    - No dia do desligamento e nos dias seguintes do mesmo mês, o status vem sugerido como Desligado.
-    - Se o lançamento original for corrigido para outro status, a sugestão desaparece automaticamente.
-    - No mês seguinte, o colaborador deixa de aparecer por causa de obter_ids_desligados_antes().
+    Retorna colaboradores cuja última ocorrência anterior no mesmo mês foi Desligado.
+    Usado para preencher automaticamente Desligado até o fim da competência,
+    sem remover o colaborador da chamada dentro do mês.
     """
     conn = conectar()
 
-    primeiro_dia_mes = date(data_referencia.year, data_referencia.month, 1)
+    primeiro_dia_mes = date(data_presenca.year, data_presenca.month, 1)
 
     df = pd.read_sql_query("""
         SELECT DISTINCT ON (colaborador_id)
             colaborador_id,
+            status,
+            observacao,
             data
         FROM presencas
-        WHERE status = 'Desligado'
-          AND data >= %s
-          AND data <= %s
-        ORDER BY colaborador_id, data DESC
-    """, conn, params=(str(primeiro_dia_mes), str(data_referencia)))
+        WHERE data >= %s
+          AND data < %s
+        ORDER BY colaborador_id, data DESC, id DESC
+    """, conn, params=(str(primeiro_dia_mes), str(data_presenca)))
 
     conn.close()
 
     if df.empty:
         return {}
 
-    df["data"] = pd.to_datetime(df["data"], errors="coerce").dt.date
-    return df.set_index("colaborador_id")["data"].to_dict()
+    df = df[df["status"] == "Desligado"].copy()
+
+    if df.empty:
+        return {}
+
+    return df.set_index("colaborador_id").to_dict(orient="index")
 
 
 def calcular_headcount_periodo(colaboradores_base, data_inicio):
@@ -2120,7 +2121,7 @@ def pagina_operacao_lancamento():
         return
 
     presencas_dia = obter_presencas_por_data(data_presenca)
-    desligados_vigentes_mes = obter_desligados_vigentes_no_mes(data_presenca)
+    desligados_sugeridos_mes = obter_desligados_sugeridos_no_mes(data_presenca)
     ids_filtrados = set(colaboradores_filtrados["id"].tolist())
     ids_ja_lancados = ids_filtrados.intersection(set(presencas_dia.keys()))
 
@@ -2170,27 +2171,24 @@ def pagina_operacao_lancamento():
             ja_lancado = existente is not None
             bloqueado = ja_lancado and not modo_alteracao
 
-            data_desligamento_vigente = desligados_vigentes_mes.get(row["id"])
+            desligado_sugerido = desligados_sugeridos_mes.get(row["id"])
 
             if existente:
                 status_atual = existente["status"]
-            elif data_desligamento_vigente:
+                observacao_atual = existente["observacao"]
+            elif desligado_sugerido:
                 status_atual = "Desligado"
+                data_origem = desligado_sugerido.get("data", "")
+                observacao_atual = f"Status Desligado replicado automaticamente desde {data_origem}."
             else:
                 status_atual = None
+                observacao_atual = ""
 
             index_status = (
                 STATUS_PRESENCA.index(status_atual)
                 if status_atual in STATUS_PRESENCA
                 else None
             )
-
-            if existente:
-                observacao_atual = existente["observacao"]
-            elif data_desligamento_vigente:
-                observacao_atual = f"Desligamento lançado em {data_desligamento_vigente.strftime('%d/%m/%Y')}."
-            else:
-                observacao_atual = ""
 
             observacao_atual = "" if pd.isna(observacao_atual) else str(observacao_atual)
 
