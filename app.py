@@ -1316,41 +1316,6 @@ def obter_ids_desligados_antes(data_referencia):
     return set(df["colaborador_id"].tolist())
 
 
-def obter_desligados_sugeridos_no_mes(data_presenca):
-    """
-    Retorna colaboradores cuja última ocorrência anterior no mesmo mês foi Desligado.
-    Usado para preencher automaticamente Desligado até o fim da competência,
-    sem remover o colaborador da chamada dentro do mês.
-    """
-    conn = conectar()
-
-    primeiro_dia_mes = date(data_presenca.year, data_presenca.month, 1)
-
-    df = pd.read_sql_query("""
-        SELECT DISTINCT ON (colaborador_id)
-            colaborador_id,
-            status,
-            observacao,
-            data
-        FROM presencas
-        WHERE data >= %s
-          AND data < %s
-        ORDER BY colaborador_id, data DESC, id DESC
-    """, conn, params=(str(primeiro_dia_mes), str(data_presenca)))
-
-    conn.close()
-
-    if df.empty:
-        return {}
-
-    df = df[df["status"] == "Desligado"].copy()
-
-    if df.empty:
-        return {}
-
-    return df.set_index("colaborador_id").to_dict(orient="index")
-
-
 def calcular_headcount_periodo(colaboradores_base, data_inicio):
     if colaboradores_base.empty:
         return 0
@@ -2121,7 +2086,6 @@ def pagina_operacao_lancamento():
         return
 
     presencas_dia = obter_presencas_por_data(data_presenca)
-    desligados_sugeridos_mes = obter_desligados_sugeridos_no_mes(data_presenca)
     ids_filtrados = set(colaboradores_filtrados["id"].tolist())
     ids_ja_lancados = ids_filtrados.intersection(set(presencas_dia.keys()))
 
@@ -2171,18 +2135,7 @@ def pagina_operacao_lancamento():
             ja_lancado = existente is not None
             bloqueado = ja_lancado and not modo_alteracao
 
-            desligado_sugerido = desligados_sugeridos_mes.get(row["id"])
-
-            if existente:
-                status_atual = existente["status"]
-                observacao_atual = existente["observacao"]
-            elif desligado_sugerido:
-                status_atual = "Desligado"
-                data_origem = desligado_sugerido.get("data", "")
-                observacao_atual = f"Status Desligado replicado automaticamente desde {data_origem}."
-            else:
-                status_atual = None
-                observacao_atual = ""
+            status_atual = existente["status"] if existente else None
 
             index_status = (
                 STATUS_PRESENCA.index(status_atual)
@@ -2190,6 +2143,7 @@ def pagina_operacao_lancamento():
                 else None
             )
 
+            observacao_atual = existente["observacao"] if existente else ""
             observacao_atual = "" if pd.isna(observacao_atual) else str(observacao_atual)
 
             col1, col2, col3, col4, col5, col6 = st.columns(
@@ -2397,332 +2351,16 @@ def pagina_gestor():
     st.title("Painel do Gestor - RH")
 
     aba1, aba2, aba3, aba4, aba5, aba6, aba7 = st.tabs([
-        "Cadastrar / Alterar Pessoas",
+        "Dashboard",
         "Importar Dados",
+        "Cadastrar / Alterar Pessoas",
         "Colaboradores",
         "Escala Folga Dominical",
-        "Dashboard",
         "Exportar Excel",
         "Acessos"
     ])
 
     with aba1:
-        st.subheader("Cadastro e alteração de colaboradores")
-        st.caption(f"Filial padrão: {FILIAL_PADRAO}")
-
-        sub1, sub2 = st.tabs([
-            "Cadastrar novo",
-            "Alterar cadastro"
-        ])
-
-        with sub1:
-            with st.form("form_colaborador"):
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    matricula = st.text_input("Matrícula")
-                    nome = st.text_input("Nome")
-                    jornada_trabalho = st.text_input("Jornada de Trabalho")
-                    cargo = st.text_input("Cargo")
-
-                with col2:
-                    setor = st.text_input("Setor")
-                    logins_jms = st.selectbox("Logins - JMS", ["Sim", "Não Precisa", "Não"])
-                    gestor_responsavel = st.text_input("Responsável")
-                    folga_dominical = st.selectbox("Folga Dominical", ["Sim", "Não"])
-                    genero = st.selectbox("Gênero", ["", "Feminino", "Masculino", "Outro"])
-                    ativo = st.checkbox("Ativo", value=True)
-
-                salvar = st.form_submit_button("Cadastrar")
-
-                if salvar:
-                    if not nome.strip():
-                        st.warning("Informe o nome do colaborador.")
-                    else:
-                        cadastrar_colaborador(
-                            matricula,
-                            nome,
-                            jornada_trabalho,
-                            cargo,
-                            setor,
-                            logins_jms,
-                            gestor_responsavel,
-                            folga_dominical,
-                            genero,
-                            ativo
-                        )
-                        st.success("Colaborador cadastrado com sucesso.")
-
-        with sub2:
-            df_colaboradores = listar_colaboradores(ativos=False)
-
-            if df_colaboradores.empty:
-                st.warning("Nenhum colaborador cadastrado.")
-            else:
-                pesquisa = st.text_input(
-                    "Pesquisar por nome, matrícula, cargo, setor ou responsável",
-                    key="pesquisa_alteracao_cadastro"
-                )
-
-                df_resultado = filtrar_dataframe_colaborador(df_colaboradores, pesquisa)
-
-                if df_resultado.empty:
-                    st.warning("Nenhum registro localizado.")
-                else:
-                    df_resultado = df_resultado.copy()
-                    df_resultado["opcao"] = (
-                        df_resultado["matricula"].astype(str) +
-                        " | " +
-                        df_resultado["nome"].astype(str) +
-                        " | " +
-                        df_resultado["gestor_responsavel"].astype(str)
-                    )
-
-                    opcao = st.selectbox(
-                        "Selecione o colaborador para alteração",
-                        df_resultado["opcao"].tolist()
-                    )
-
-                    registro = df_resultado[df_resultado["opcao"] == opcao].iloc[0]
-
-                    with st.form("form_alterar_colaborador"):
-                        col1, col2 = st.columns(2)
-
-                        with col1:
-                            nova_matricula = st.text_input(
-                                "Matrícula",
-                                value=str(registro["matricula"])
-                            )
-                            novo_nome = st.text_input(
-                                "Nome",
-                                value=str(registro["nome"])
-                            )
-                            nova_jornada = st.text_input(
-                                "Jornada de Trabalho",
-                                value=str(registro["jornada_trabalho"])
-                            )
-                            novo_cargo = st.text_input(
-                                "Cargo",
-                                value=str(registro["cargo"])
-                            )
-
-                        with col2:
-                            novo_setor = st.text_input(
-                                "Setor",
-                                value=str(registro["setor"])
-                            )
-                            novo_login = st.selectbox(
-                                "Logins - JMS",
-                                ["Sim", "Não Precisa", "Não"],
-                                index=["Sim", "Não Precisa", "Não"].index(str(registro["logins_jms"]))
-                                if str(registro["logins_jms"]) in ["Sim", "Não Precisa", "Não"]
-                                else 0
-                            )
-                            novo_responsavel = st.text_input(
-                                "Responsável",
-                                value=str(registro["gestor_responsavel"])
-                            )
-                            novo_folga_dominical = st.selectbox(
-                                "Folga Dominical",
-                                ["Sim", "Não"],
-                                index=["Sim", "Não"].index(str(registro.get("folga_dominical", "Sim")))
-                                if str(registro.get("folga_dominical", "Sim")) in ["Sim", "Não"]
-                                else 0
-                            )
-                            novo_genero = st.selectbox(
-                                "Gênero",
-                                ["", "Feminino", "Masculino", "Outro"],
-                                index=["", "Feminino", "Masculino", "Outro"].index(str(registro.get("genero", "")))
-                                if str(registro.get("genero", "")) in ["", "Feminino", "Masculino", "Outro"]
-                                else 0
-                            )
-                            novo_ativo = st.checkbox(
-                                "Ativo",
-                                value=bool(int(registro["ativo"])) if str(registro["ativo"]).isdigit() else bool(registro["ativo"])
-                            )
-
-                        salvar_alteracao = st.form_submit_button("Salvar alteração do cadastro")
-
-                        if salvar_alteracao:
-                            if not novo_nome.strip():
-                                st.warning("Informe o nome do colaborador.")
-                            else:
-                                atualizar_colaborador(
-                                    registro["id"],
-                                    nova_matricula,
-                                    novo_nome,
-                                    nova_jornada,
-                                    novo_cargo,
-                                    novo_setor,
-                                    novo_login,
-                                    novo_responsavel,
-                                    novo_folga_dominical,
-                                    novo_genero,
-                                    novo_ativo
-                                )
-                                st.success("Cadastro alterado com sucesso.")
-
-    with aba2:
-        st.subheader("Importar dados de colaboradores")
-        st.caption(f"Filial padrão aplicada automaticamente: {FILIAL_PADRAO}")
-
-        modelo_importacao = gerar_modelo_importacao()
-
-        st.download_button(
-            "Baixar modelo de importação",
-            data=modelo_importacao,
-            file_name="modelo_importacao_colaboradores.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-
-        st.markdown("**Colunas recomendadas:**")
-        st.code("matricula | nome | jornada_trabalho | cargo | setor | logins_jms | gestor_responsavel | folga_dominical | genero | ativo")
-
-        arquivo = st.file_uploader(
-            "Arquivo Excel",
-            type=["xlsx"]
-        )
-
-        if arquivo is not None:
-            try:
-                excel = pd.ExcelFile(arquivo)
-
-                col_imp1, col_imp2 = st.columns(2)
-
-                with col_imp1:
-                    aba_excel = st.selectbox("Aba da planilha", excel.sheet_names)
-
-                with col_imp2:
-                    linha_cabecalho = st.number_input(
-                        "Linha onde está o cabeçalho",
-                        min_value=1,
-                        value=1,
-                        step=1
-                    )
-
-                arquivo.seek(0)
-
-                df_importado = pd.read_excel(
-                    arquivo,
-                    sheet_name=aba_excel,
-                    header=int(linha_cabecalho) - 1
-                )
-
-                df_preparado = preparar_dataframe_importacao(df_importado)
-                df_analisado = analisar_duplicidades_importacao(df_preparado)
-
-                total_novos = len(df_analisado[df_analisado["situacao_importacao"].astype(str).str.startswith("Novo")])
-                total_atualizacoes = len(df_analisado[df_analisado["situacao_importacao"].astype(str).str.contains("Atualização", na=False)])
-                total_duplicados_arquivo = len(df_analisado[df_analisado["situacao_importacao"].astype(str).str.contains("Duplicado no arquivo", na=False)])
-
-                colm1, colm2, colm3 = st.columns(3)
-                colm1.metric("Novos registros", total_novos)
-                colm2.metric("Atualizações identificadas", total_atualizacoes)
-                colm3.metric("Duplicatas no arquivo", total_duplicados_arquivo)
-
-                st.write("Revise, corrija, exclua ou acrescente linhas antes de importar:")
-
-                df_editado = st.data_editor(
-                    df_analisado,
-                    use_container_width=True,
-                    num_rows="dynamic",
-                    hide_index=True,
-                    key="editor_importacao_colaboradores",
-                    column_config={
-                        "situacao_importacao": st.column_config.TextColumn(
-                            "Situação da importação",
-                            disabled=True
-                        ),
-                        "id_existente": st.column_config.TextColumn(
-                            "ID existente",
-                            disabled=True
-                        ),
-                        "folga_dominical": st.column_config.SelectboxColumn("Folga Dominical", options=["Sim", "Não"]),
-                        "genero": st.column_config.SelectboxColumn("Gênero", options=["", "Feminino", "Masculino", "Outro"]),
-                        "ativo": st.column_config.CheckboxColumn("Ativo")
-                    }
-                )
-
-                atualizar_existentes = st.checkbox(
-                    "Atualizar colaboradores existentes por matrícula ou nome",
-                    value=True
-                )
-
-                atualizacao_incremental = st.checkbox(
-                    "Atualização incremental: preencher somente campos novos ou informados sem apagar campos vazios",
-                    value=True
-                )
-
-                if st.button("Importar dados para o sistema"):
-                    resultado = importar_colaboradores(
-                        df_editado,
-                        atualizar_existentes=atualizar_existentes,
-                        atualizacao_incremental=atualizacao_incremental
-                    )
-
-                    st.success(
-                        f"Importação concluída. "
-                        f"Inseridos: {resultado['inseridos']} | "
-                        f"Atualizados: {resultado['atualizados']} | "
-                        f"Ignorados: {resultado['ignorados']} | "
-                        f"Duplicatas sinalizadas no arquivo: {resultado['duplicados_arquivo']}"
-                    )
-
-            except Exception as erro:
-                st.error(f"Erro ao importar planilha: {erro}")
-
-    with aba3:
-        st.subheader("Base de colaboradores")
-        st.caption("Edite os dados e clique em salvar alterações. A filial permanece MG CGE.")
-
-        df_colaboradores = listar_colaboradores(ativos=False)
-
-        if df_colaboradores.empty:
-            st.warning("Nenhum colaborador cadastrado.")
-        else:
-            pesquisa_base = st.text_input(
-                "Pesquisar na base de colaboradores",
-                key="pesquisa_base_colaboradores"
-            )
-
-            df_colaboradores = filtrar_dataframe_colaborador(df_colaboradores, pesquisa_base)
-
-            if df_colaboradores.empty:
-                st.warning("Nenhum colaborador localizado.")
-            else:
-                df_colaboradores["ativo"] = df_colaboradores["ativo"].apply(
-                    lambda x: bool(int(x)) if str(x).isdigit() else bool(x)
-                )
-
-                df_editado = st.data_editor(
-                    df_colaboradores,
-                    use_container_width=True,
-                    num_rows="dynamic",
-                    hide_index=True,
-                    key="editor_colaboradores",
-                    column_config={
-                        "id": st.column_config.NumberColumn("ID", disabled=True),
-                        "filial": st.column_config.TextColumn("Filial", disabled=True),
-                        "folga_dominical": st.column_config.SelectboxColumn("Folga Dominical", options=["Sim", "Não"]),
-                        "genero": st.column_config.SelectboxColumn("Gênero", options=["", "Feminino", "Masculino", "Outro"]),
-                        "ativo": st.column_config.CheckboxColumn("Ativo")
-                    }
-                )
-
-                if st.button("Salvar alterações da base"):
-                    resultado = salvar_edicao_colaboradores(df_editado)
-
-                    st.success(
-                        f"Base atualizada. "
-                        f"Atualizados: {resultado['atualizados']} | "
-                        f"Inseridos: {resultado['inseridos']} | "
-                        f"Ignorados: {resultado['ignorados']}"
-                    )
-
-    with aba4:
-        pagina_escala_folga_dominical(modo="Gestor")
-
-    with aba5:
         st.subheader("Dashboard gerencial")
         st.caption(f"Filial padrão: {FILIAL_PADRAO}")
 
@@ -2968,6 +2606,322 @@ def pagina_gestor():
                 use_container_width=True,
                 hide_index=True
             )
+
+    with aba2:
+        st.subheader("Importar dados de colaboradores")
+        st.caption(f"Filial padrão aplicada automaticamente: {FILIAL_PADRAO}")
+
+        modelo_importacao = gerar_modelo_importacao()
+
+        st.download_button(
+            "Baixar modelo de importação",
+            data=modelo_importacao,
+            file_name="modelo_importacao_colaboradores.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+        st.markdown("**Colunas recomendadas:**")
+        st.code("matricula | nome | jornada_trabalho | cargo | setor | logins_jms | gestor_responsavel | folga_dominical | genero | ativo")
+
+        arquivo = st.file_uploader(
+            "Arquivo Excel",
+            type=["xlsx"]
+        )
+
+        if arquivo is not None:
+            try:
+                excel = pd.ExcelFile(arquivo)
+
+                col_imp1, col_imp2 = st.columns(2)
+
+                with col_imp1:
+                    aba_excel = st.selectbox("Aba da planilha", excel.sheet_names)
+
+                with col_imp2:
+                    linha_cabecalho = st.number_input(
+                        "Linha onde está o cabeçalho",
+                        min_value=1,
+                        value=1,
+                        step=1
+                    )
+
+                arquivo.seek(0)
+
+                df_importado = pd.read_excel(
+                    arquivo,
+                    sheet_name=aba_excel,
+                    header=int(linha_cabecalho) - 1
+                )
+
+                df_preparado = preparar_dataframe_importacao(df_importado)
+                df_analisado = analisar_duplicidades_importacao(df_preparado)
+
+                total_novos = len(df_analisado[df_analisado["situacao_importacao"].astype(str).str.startswith("Novo")])
+                total_atualizacoes = len(df_analisado[df_analisado["situacao_importacao"].astype(str).str.contains("Atualização", na=False)])
+                total_duplicados_arquivo = len(df_analisado[df_analisado["situacao_importacao"].astype(str).str.contains("Duplicado no arquivo", na=False)])
+
+                colm1, colm2, colm3 = st.columns(3)
+                colm1.metric("Novos registros", total_novos)
+                colm2.metric("Atualizações identificadas", total_atualizacoes)
+                colm3.metric("Duplicatas no arquivo", total_duplicados_arquivo)
+
+                st.write("Revise, corrija, exclua ou acrescente linhas antes de importar:")
+
+                df_editado = st.data_editor(
+                    df_analisado,
+                    use_container_width=True,
+                    num_rows="dynamic",
+                    hide_index=True,
+                    key="editor_importacao_colaboradores",
+                    column_config={
+                        "situacao_importacao": st.column_config.TextColumn(
+                            "Situação da importação",
+                            disabled=True
+                        ),
+                        "id_existente": st.column_config.TextColumn(
+                            "ID existente",
+                            disabled=True
+                        ),
+                        "folga_dominical": st.column_config.SelectboxColumn("Folga Dominical", options=["Sim", "Não"]),
+                        "genero": st.column_config.SelectboxColumn("Gênero", options=["", "Feminino", "Masculino", "Outro"]),
+                        "ativo": st.column_config.CheckboxColumn("Ativo")
+                    }
+                )
+
+                atualizar_existentes = st.checkbox(
+                    "Atualizar colaboradores existentes por matrícula ou nome",
+                    value=True
+                )
+
+                atualizacao_incremental = st.checkbox(
+                    "Atualização incremental: preencher somente campos novos ou informados sem apagar campos vazios",
+                    value=True
+                )
+
+                if st.button("Importar dados para o sistema"):
+                    resultado = importar_colaboradores(
+                        df_editado,
+                        atualizar_existentes=atualizar_existentes,
+                        atualizacao_incremental=atualizacao_incremental
+                    )
+
+                    st.success(
+                        f"Importação concluída. "
+                        f"Inseridos: {resultado['inseridos']} | "
+                        f"Atualizados: {resultado['atualizados']} | "
+                        f"Ignorados: {resultado['ignorados']} | "
+                        f"Duplicatas sinalizadas no arquivo: {resultado['duplicados_arquivo']}"
+                    )
+
+            except Exception as erro:
+                st.error(f"Erro ao importar planilha: {erro}")
+
+    with aba3:
+        st.subheader("Cadastro e alteração de colaboradores")
+        st.caption(f"Filial padrão: {FILIAL_PADRAO}")
+
+        sub1, sub2 = st.tabs([
+            "Cadastrar novo",
+            "Alterar cadastro"
+        ])
+
+        with sub1:
+            with st.form("form_colaborador"):
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    matricula = st.text_input("Matrícula")
+                    nome = st.text_input("Nome")
+                    jornada_trabalho = st.text_input("Jornada de Trabalho")
+                    cargo = st.text_input("Cargo")
+
+                with col2:
+                    setor = st.text_input("Setor")
+                    logins_jms = st.selectbox("Logins - JMS", ["Sim", "Não Precisa", "Não"])
+                    gestor_responsavel = st.text_input("Responsável")
+                    folga_dominical = st.selectbox("Folga Dominical", ["Sim", "Não"])
+                    genero = st.selectbox("Gênero", ["", "Feminino", "Masculino", "Outro"])
+                    ativo = st.checkbox("Ativo", value=True)
+
+                salvar = st.form_submit_button("Cadastrar")
+
+                if salvar:
+                    if not nome.strip():
+                        st.warning("Informe o nome do colaborador.")
+                    else:
+                        cadastrar_colaborador(
+                            matricula,
+                            nome,
+                            jornada_trabalho,
+                            cargo,
+                            setor,
+                            logins_jms,
+                            gestor_responsavel,
+                            folga_dominical,
+                            genero,
+                            ativo
+                        )
+                        st.success("Colaborador cadastrado com sucesso.")
+
+        with sub2:
+            df_colaboradores = listar_colaboradores(ativos=False)
+
+            if df_colaboradores.empty:
+                st.warning("Nenhum colaborador cadastrado.")
+            else:
+                pesquisa = st.text_input(
+                    "Pesquisar por nome, matrícula, cargo, setor ou responsável",
+                    key="pesquisa_alteracao_cadastro"
+                )
+
+                df_resultado = filtrar_dataframe_colaborador(df_colaboradores, pesquisa)
+
+                if df_resultado.empty:
+                    st.warning("Nenhum registro localizado.")
+                else:
+                    df_resultado = df_resultado.copy()
+                    df_resultado["opcao"] = (
+                        df_resultado["matricula"].astype(str) +
+                        " | " +
+                        df_resultado["nome"].astype(str) +
+                        " | " +
+                        df_resultado["gestor_responsavel"].astype(str)
+                    )
+
+                    opcao = st.selectbox(
+                        "Selecione o colaborador para alteração",
+                        df_resultado["opcao"].tolist()
+                    )
+
+                    registro = df_resultado[df_resultado["opcao"] == opcao].iloc[0]
+
+                    with st.form("form_alterar_colaborador"):
+                        col1, col2 = st.columns(2)
+
+                        with col1:
+                            nova_matricula = st.text_input(
+                                "Matrícula",
+                                value=str(registro["matricula"])
+                            )
+                            novo_nome = st.text_input(
+                                "Nome",
+                                value=str(registro["nome"])
+                            )
+                            nova_jornada = st.text_input(
+                                "Jornada de Trabalho",
+                                value=str(registro["jornada_trabalho"])
+                            )
+                            novo_cargo = st.text_input(
+                                "Cargo",
+                                value=str(registro["cargo"])
+                            )
+
+                        with col2:
+                            novo_setor = st.text_input(
+                                "Setor",
+                                value=str(registro["setor"])
+                            )
+                            novo_login = st.selectbox(
+                                "Logins - JMS",
+                                ["Sim", "Não Precisa", "Não"],
+                                index=["Sim", "Não Precisa", "Não"].index(str(registro["logins_jms"]))
+                                if str(registro["logins_jms"]) in ["Sim", "Não Precisa", "Não"]
+                                else 0
+                            )
+                            novo_responsavel = st.text_input(
+                                "Responsável",
+                                value=str(registro["gestor_responsavel"])
+                            )
+                            novo_folga_dominical = st.selectbox(
+                                "Folga Dominical",
+                                ["Sim", "Não"],
+                                index=["Sim", "Não"].index(str(registro.get("folga_dominical", "Sim")))
+                                if str(registro.get("folga_dominical", "Sim")) in ["Sim", "Não"]
+                                else 0
+                            )
+                            novo_genero = st.selectbox(
+                                "Gênero",
+                                ["", "Feminino", "Masculino", "Outro"],
+                                index=["", "Feminino", "Masculino", "Outro"].index(str(registro.get("genero", "")))
+                                if str(registro.get("genero", "")) in ["", "Feminino", "Masculino", "Outro"]
+                                else 0
+                            )
+                            novo_ativo = st.checkbox(
+                                "Ativo",
+                                value=bool(int(registro["ativo"])) if str(registro["ativo"]).isdigit() else bool(registro["ativo"])
+                            )
+
+                        salvar_alteracao = st.form_submit_button("Salvar alteração do cadastro")
+
+                        if salvar_alteracao:
+                            if not novo_nome.strip():
+                                st.warning("Informe o nome do colaborador.")
+                            else:
+                                atualizar_colaborador(
+                                    registro["id"],
+                                    nova_matricula,
+                                    novo_nome,
+                                    nova_jornada,
+                                    novo_cargo,
+                                    novo_setor,
+                                    novo_login,
+                                    novo_responsavel,
+                                    novo_folga_dominical,
+                                    novo_genero,
+                                    novo_ativo
+                                )
+                                st.success("Cadastro alterado com sucesso.")
+
+    with aba4:
+        st.subheader("Base de colaboradores")
+        st.caption("Edite os dados e clique em salvar alterações. A filial permanece MG CGE.")
+
+        df_colaboradores = listar_colaboradores(ativos=False)
+
+        if df_colaboradores.empty:
+            st.warning("Nenhum colaborador cadastrado.")
+        else:
+            pesquisa_base = st.text_input(
+                "Pesquisar na base de colaboradores",
+                key="pesquisa_base_colaboradores"
+            )
+
+            df_colaboradores = filtrar_dataframe_colaborador(df_colaboradores, pesquisa_base)
+
+            if df_colaboradores.empty:
+                st.warning("Nenhum colaborador localizado.")
+            else:
+                df_colaboradores["ativo"] = df_colaboradores["ativo"].apply(
+                    lambda x: bool(int(x)) if str(x).isdigit() else bool(x)
+                )
+
+                df_editado = st.data_editor(
+                    df_colaboradores,
+                    use_container_width=True,
+                    num_rows="dynamic",
+                    hide_index=True,
+                    key="editor_colaboradores",
+                    column_config={
+                        "id": st.column_config.NumberColumn("ID", disabled=True),
+                        "filial": st.column_config.TextColumn("Filial", disabled=True),
+                        "folga_dominical": st.column_config.SelectboxColumn("Folga Dominical", options=["Sim", "Não"]),
+                        "genero": st.column_config.SelectboxColumn("Gênero", options=["", "Feminino", "Masculino", "Outro"]),
+                        "ativo": st.column_config.CheckboxColumn("Ativo")
+                    }
+                )
+
+                if st.button("Salvar alterações da base"):
+                    resultado = salvar_edicao_colaboradores(df_editado)
+
+                    st.success(
+                        f"Base atualizada. "
+                        f"Atualizados: {resultado['atualizados']} | "
+                        f"Inseridos: {resultado['inseridos']} | "
+                        f"Ignorados: {resultado['ignorados']}"
+                    )
+
+    with aba5:
+        pagina_escala_folga_dominical(modo="Gestor")
 
     with aba6:
         st.subheader("Exportar Excel")
