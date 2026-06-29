@@ -1589,10 +1589,13 @@ def pagina_operacao_lancamento():
             ja_lancado = existente is not None
             bloqueado = ja_lancado and not modo_alteracao
 
-            status_atual = existente["status"] if existente else "Presente"
+            status_atual = existente["status"] if existente else None
 
-            if status_atual not in STATUS_PRESENCA:
-                status_atual = "Presente"
+            index_status = (
+                STATUS_PRESENCA.index(status_atual)
+                if status_atual in STATUS_PRESENCA
+                else None
+            )
 
             observacao_atual = existente["observacao"] if existente else ""
             observacao_atual = "" if pd.isna(observacao_atual) else str(observacao_atual)
@@ -1610,7 +1613,8 @@ def pagina_operacao_lancamento():
                 status = st.selectbox(
                     "Status",
                     STATUS_PRESENCA,
-                    index=STATUS_PRESENCA.index(status_atual),
+                    index=index_status,
+                    placeholder="Selecione",
                     key=f"status_{row['id']}_{data_presenca}_{responsavel_selecionado}",
                     label_visibility="collapsed",
                     disabled=bloqueado
@@ -1638,6 +1642,10 @@ def pagina_operacao_lancamento():
         salvar = st.form_submit_button(rotulo_botao, disabled=not pode_salvar)
 
         if salvar:
+            if any(item["status"] is None for item in registros):
+                st.warning("Selecione o status de todos os colaboradores antes de salvar.")
+                st.stop()
+
             inseridos = 0
             atualizados = 0
             bloqueados = 0
